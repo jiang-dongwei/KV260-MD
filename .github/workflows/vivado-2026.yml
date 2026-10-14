@@ -1,0 +1,57 @@
+name: Vivado 2026 cloud
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: First validate runner, then toolchain and license
+        type: choice
+        default: runner-check
+        options: [runner-check, toolchain-check]
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: md-vivado-2026
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Measure public runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-output
+          { nproc; free -h; df -h /; uname -m; } | tee ci-output/runner.txt
+          test "$(nproc)" -ge 4
+      - name: Pull private Vivado image and run exact K26 checks
+        if: inputs.phase == 'toolchain-check'
+        env:
+          IMAGE: ${{ vars.VIVADO_IMAGE }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VIVADO_LICENSE: ${{ secrets.VIVADO_LICENSE }}
+          DOCKER_CONFIG: ${{ runner.temp }}/md-docker-auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE"
+          [[ "$IMAGE" == ghcr.io/jiang-dongwei/*@sha256:* ]]
+          test -n "$VIVADO_LICENSE"
+          mkdir -p "$DOCKER_CONFIG"
+          trap 'rm -rf "$DOCKER_CONFIG" "$RUNNER_TEMP/md-license"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "$IMAGE"
+          mkdir -m 700 "$RUNNER_TEMP/md-license"
+          printf '%s' "$VIVADO_LICENSE" > "$RUNNER_TEMP/md-license/Xilinx.lic"
+          chmod 600 "$RUNNER_TEMP/md-license/Xilinx.lic"
+          docker run --rm --cpus 4 --memory 13g --hostname md-ci-vivado --mac-address 02:4d:44:26:01:01             -e KRIA_VIVADO_VERSION=2026.1 -e KRIA_VIVADO_THREADS=4             -v "$PWD:/work" -v "$RUNNER_TEMP/md-license/Xilinx.lic:/tmp/Xilinx.lic:ro"             -w /work "$IMAGE" /work/ci/compile.sh bash -c             '/work/scripts/vivado.sh -mode batch -source /work/hardware/kv260/preflight-k26.tcl && /work/scripts/vivado.sh -mode batch -source /work/ci/license-smoke.tcl'             2>&1 | tee ci-output/preflight.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: md-cloud-preflight
+          path: ci-output/
+          retention-days: 3

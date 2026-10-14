@@ -1,0 +1,8 @@
+*.lic
+*.log
+*.jou
+.Xil/
+__pycache__/
+ci-output/
+build/implementations/
+build/*-progress.json
