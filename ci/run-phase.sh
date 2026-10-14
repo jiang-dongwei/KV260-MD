@@ -2,7 +2,7 @@
 set -euo pipefail
 /work/ci/compile.sh /work/scripts/vivado.sh -mode batch -source /work/hardware/kv260/preflight-k26.tcl
 /work/ci/compile.sh /work/scripts/vivado.sh -mode batch -source /work/ci/license-smoke.tcl
-if [[ "$BUILD_PHASE" == synth-review ]]; then
+if [[ "$BUILD_PHASE" == synth-review || "$BUILD_PHASE" == full-build ]]; then
   /work/ci/compile.sh /work/scripts/vivado.sh -mode batch -source /work/hardware/kv260/build.tcl -tclargs md
   /work/ci/compile.sh /work/scripts/vivado.sh -mode batch -source /work/hardware/kv260/review-cdc.tcl -tclargs md
   cp -a /build/kria-mister-md-vivado/cdc-review /work/ci-output/

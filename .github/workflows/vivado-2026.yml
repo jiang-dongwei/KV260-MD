@@ -6,7 +6,7 @@ on:
         description: First validate runner, then toolchain and license
         type: choice
         default: runner-check
-        options: [runner-check, toolchain-check, synth-review]
+        options: [runner-check, toolchain-check, synth-review, full-build]
 permissions:
   contents: read
   packages: read
@@ -57,3 +57,28 @@ jobs:
           name: md-cloud-preflight
           path: ci-output/
           retention-days: 3
+      - name: Wait for exact CDC review and produce firmware
+        if: inputs.phase == 'full-build'
+        env:
+          IMAGE: ${{ vars.VIVADO_IMAGE }}
+          VIVADO_LICENSE: ${{ secrets.VIVADO_LICENSE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/md-license"
+          trap 'rm -rf "$RUNNER_TEMP/md-license"' EXIT
+          printf '%s' "$VIVADO_LICENSE" > "$RUNNER_TEMP/md-license/Xilinx.lic"
+          chmod 600 "$RUNNER_TEMP/md-license/Xilinx.lic"
+          docker run --rm --cpus 4 --memory 13g --hostname md-ci-vivado --mac-address 02:4d:44:26:01:01 -e KRIA_VIVADO_VERSION=2026.1 -e KRIA_VIVADO_THREADS=4 -v "$PWD:/work" -v "$RUNNER_TEMP/md-build:/build" -v "$RUNNER_TEMP/md-license/Xilinx.lic:/tmp/Xilinx.lic:ro" -w /work "$IMAGE" /work/ci/run-route.sh 2>&1 | tee ci-output/route.log
+      - uses: actions/upload-artifact@v4
+        if: inputs.phase == 'full-build' && always()
+        with:
+          name: md-firmware-and-route-evidence
+          path: |
+            ci-output/*.k26
+            ci-output/*.sha256
+            ci-output/implementation.json
+            ci-output/cdc-accepted.json
+            ci-output/route.log
+            ci-output/routed-reports/
+          retention-days: 7
