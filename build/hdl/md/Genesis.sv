@@ -1104,8 +1104,11 @@ end
 
 endmodule
 
-// Read-only frame-held observation of the native/cofi boundary. Samples at
-// active x=32,96,160,224: blue=0, red=1, green=2, other=3. No video feedback.
+// Read-only observation, with no feedback into video. C/D retain complete-line
+// width and samples at x32/96/160/224 (blue0/red1/green2/other3).
+// E/F count complete lines and incorrect lines across the entire frame.
+// A VBL release within an active line is excluded until the next HBL start. These
+// literal red-left/green-right checks apply only to MD-Video-Test diagnostics.
 module km_md_video_probe(
     input wire clk,reset,raw_ce,raw_hblank,raw_vblank,
     input wire [3:0] raw_r,raw_g,raw_b,
@@ -1113,10 +1116,14 @@ module km_md_video_probe(
     input wire [7:0] stream_r,stream_g,stream_b,
     output reg [31:0] debug_word
 );
-    reg raw_de_old,stream_de_old,raw_vblank_old;
+    reg raw_de_old,stream_de_old,raw_vblank_old,stream_vblank_old;
+    reg raw_hblank_old,stream_hblank_old,raw_complete_start,stream_complete_start;
     reg [9:0] raw_count,stream_count,raw_width,stream_width;
     reg [7:0] colors_work,colors_complete,stream_colors_work,stream_colors_complete;
-    reg publish_stream;
+    reg [1:0] publish_stage;
+    reg raw_line_bad,stream_line_bad;
+    reg [8:0] raw_lines,raw_bad_lines,raw_frame_lines,raw_frame_bad;
+    reg [8:0] stream_lines,stream_bad_lines;
     wire raw_de=!(raw_hblank || raw_vblank);
     wire stream_de=!(stream_hblank || stream_vblank);
     wire [1:0] color_code=(raw_r!=0 && raw_g==0 && raw_b==0) ? 2'd1 :
@@ -1125,19 +1132,28 @@ module km_md_video_probe(
     wire [1:0] stream_color_code=(stream_r!=0 && stream_g==0 && stream_b==0) ? 2'd1 :
         (stream_g!=0 && stream_r==0 && stream_b==0) ? 2'd2 :
         (stream_b!=0 && stream_r==0 && stream_g==0) ? 2'd0 : 2'd3;
+    wire [1:0] raw_expected=raw_count<(raw_width>>1) ? 2'd1 : 2'd2;
+    wire [1:0] stream_expected=stream_count<(stream_width>>1) ? 2'd1 : 2'd2;
     always @(posedge clk) begin
         if(reset) begin
-            raw_de_old<=0;stream_de_old<=0;raw_vblank_old<=0;
+            raw_de_old<=0;stream_de_old<=0;raw_vblank_old<=0;stream_vblank_old<=0;
+            raw_hblank_old<=1;stream_hblank_old<=1;raw_complete_start<=0;stream_complete_start<=0;
             raw_count<=0;stream_count<=0;raw_width<=0;stream_width<=0;
             colors_work<=0;colors_complete<=0;debug_word<=0;
-            stream_colors_work<=0;stream_colors_complete<=0;publish_stream<=0;
+            stream_colors_work<=0;stream_colors_complete<=0;publish_stage<=0;
+            raw_line_bad<=0;stream_line_bad<=0;
+            raw_lines<=0;raw_bad_lines<=0;raw_frame_lines<=0;raw_frame_bad<=0;
+            stream_lines<=0;stream_bad_lines<=0;
         end else begin
             if(raw_ce) begin
-                raw_de_old<=raw_de;raw_vblank_old<=raw_vblank;
+                raw_de_old<=raw_de;raw_vblank_old<=raw_vblank;raw_hblank_old<=raw_hblank;
                 if(raw_de) begin
-                    if(!raw_de_old) begin raw_count<=1;colors_work<=0;end
-                    else begin
+                    if(!raw_de_old) begin
+                        raw_count<=1;colors_work<=0;raw_line_bad<=color_code!=2'd1;
+                        raw_complete_start<=raw_hblank_old;
+                    end else begin
                         raw_count<=raw_count+1'b1;
+                        raw_line_bad<=raw_line_bad || color_code!=raw_expected;
                         case(raw_count)
                             32: colors_work[1:0]<=color_code;
                             96: colors_work[3:2]<=color_code;
@@ -1146,22 +1162,27 @@ module km_md_video_probe(
                             default: ;
                         endcase
                     end
-                end else if(raw_de_old && !raw_vblank) begin
+                end else if(raw_de_old && !raw_vblank && raw_complete_start) begin
                     raw_width<=raw_count;colors_complete<=colors_work;
+                    if(raw_lines!=9'h1ff) raw_lines<=raw_lines+1'b1;
+                    if((raw_line_bad || raw_count!=raw_width ||
+                        (raw_count!=256 && raw_count!=320)) && raw_bad_lines!=9'h1ff)
+                        raw_bad_lines<=raw_bad_lines+1'b1;
                 end
-                // Publish only in blanking; reads must be stable across repeats.
                 if(raw_vblank && !raw_vblank_old) begin
-                    debug_word<={3'b110,publish_stream,raw_width,stream_width,
-                        publish_stream ? stream_colors_complete : colors_complete};
-                    publish_stream<=!publish_stream;
+                    raw_frame_lines<=raw_lines;raw_frame_bad<=raw_bad_lines;
+                    raw_lines<=0;raw_bad_lines<=0;
                 end
             end
             if(stream_ce) begin
-                stream_de_old<=stream_de;
+                stream_de_old<=stream_de;stream_vblank_old<=stream_vblank;stream_hblank_old<=stream_hblank;
                 if(stream_de) begin
-                    if(!stream_de_old) begin stream_count<=1;stream_colors_work<=0;end
-                    else begin
+                    if(!stream_de_old) begin
+                        stream_count<=1;stream_colors_work<=0;stream_line_bad<=stream_color_code!=2'd1;
+                        stream_complete_start<=stream_hblank_old;
+                    end else begin
                         stream_count<=stream_count+1'b1;
+                        stream_line_bad<=stream_line_bad || stream_color_code!=stream_expected;
                         case(stream_count)
                             32: stream_colors_work[1:0]<=stream_color_code;
                             96: stream_colors_work[3:2]<=stream_color_code;
@@ -1170,8 +1191,24 @@ module km_md_video_probe(
                             default: ;
                         endcase
                     end
-                end else if(stream_de_old && !stream_vblank) begin
+                end else if(stream_de_old && !stream_vblank && stream_complete_start) begin
                     stream_width<=stream_count;stream_colors_complete<=stream_colors_work;
+                    if(stream_lines!=9'h1ff) stream_lines<=stream_lines+1'b1;
+                    if((stream_line_bad || stream_count!=stream_width ||
+                        (stream_count!=256 && stream_count!=320)) && stream_bad_lines!=9'h1ff)
+                        stream_bad_lines<=stream_bad_lines+1'b1;
+                end
+                // Raw frame totals were held at the preceding native VBL edge.
+                // Publish after post-cofi VBL, with every bus payload frame-held.
+                if(stream_vblank && !stream_vblank_old) begin
+                    case(publish_stage)
+                        0: debug_word<={4'hc,raw_width,stream_width,colors_complete};
+                        1: debug_word<={4'hd,raw_width,stream_width,stream_colors_complete};
+                        2: debug_word<={4'he,raw_width,raw_frame_lines,raw_frame_bad};
+                        3: debug_word<={4'hf,stream_width,stream_lines,stream_bad_lines};
+                    endcase
+                    publish_stage<=publish_stage+1'b1;
+                    stream_lines<=0;stream_bad_lines<=0;
                 end
             end
         end

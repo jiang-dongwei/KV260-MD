@@ -9,3 +9,7 @@ GitHub Actions uses a public Linux runner and four Vivado threads. The runner pr
 Run **Vivado 2026 cloud**, first `runner-check`, then `toolchain-check`. The latter verifies version, K26 board/IP availability and a tiny K26 synthesis/implementation license checkout. The `synth-review` phase runs full MD synthesis and exports the constrained checkpoint, CDC reports and source identity; routing requires review tied to the exact checkpoint.
 
 Cloud host identity: `md-ci-vivado`, Ethernet `02:4d:44:26:01:01`. Obtain a separate certificate for this identity; do not transfer or change the certificate used by local builds.
+
+The pending full-build artifact is `MD03-Diag-2026.k26`, a read-only diagnostic
+observer rather than a rendering repair. See [MD03 observation protocol](reference-docs/MD03_DIAGNOSTIC.md)
+for whole-frame counts, fixture restrictions and remaining hardware validation.
