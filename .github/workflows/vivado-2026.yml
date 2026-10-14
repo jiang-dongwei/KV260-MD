@@ -1,4 +1,5 @@
 name: Vivado 2026 cloud
+run-name: MD ${{ inputs.phase }} — ${{ github.sha }}
 on:
   workflow_dispatch:
     inputs:
