@@ -486,13 +486,25 @@ module km_application(
 `endif
     assign debug_snapshot_axi=672'd0;
 `endif
+    wire [31:0] control_debug;
+`ifdef MD_CORE
+    // Move the complete frame-held diagnostic word using the same acknowledged
+    // snapshot contract as the other platform mailboxes. The control sampler
+    // then receives an AXI-domain word, rather than independent core-domain bits.
+    km_frame_config_cdc #(.WIDTH(32),.FRAME_BOUNDARY(0)) md_video_snapshot(
+        .src_clk(core_clk),.src_resetn(core_resetn),.src_data(core_debug),.src_busy(),
+        .dst_clk(axi_clk),.dst_resetn(axi_resetn),.dst_frame(1'b0),
+        .dst_data(control_debug),.dst_changed());
+`else
+    assign control_debug=core_debug;
+`endif
 `ifdef N64_CORE
     km_control #(.N64_DEBUG(1)) control(
 `else
     km_control control(
 `endif
         .axi_clk(axi_clk),.axi_resetn(axi_resetn),
-        .core_clk(core_clk),.core_resetn(core_resetn),.core_ready(core_ready),.core_debug(core_debug),
+        .core_clk(core_clk),.core_resetn(core_resetn),.core_ready(core_ready),.core_debug(control_debug),
         .debug_snapshot_axi(debug_snapshot_axi),
         .core_cmd_valid(command_valid),.core_cmd(command),.core_argument(argument),
         .core_cmd_accept(command_accept),.core_rsp_valid(response_valid),.core_result(result),

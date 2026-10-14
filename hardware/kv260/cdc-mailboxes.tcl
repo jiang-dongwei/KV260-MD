@@ -135,6 +135,10 @@ km_first_stage kria_platform_i/pixel_gate/inst enable_meta_reg
 
 km_payload $km_app/control {mailbox_cmd mailbox_argument} $km_app/control {core_cmd core_argument}
 km_payload $km_app/control {mailbox_result} $km_app/control {result_reg}
+if {$core_kind eq "md"} {
+    km_payload $km_app/md_video_snapshot {held_data} $km_app/md_video_snapshot {dst_data}
+    foreach name {ack_meta_reg req_meta_reg} { km_first_stage $km_app/md_video_snapshot $name }
+}
 foreach name {request_sync_reg[0] response_sync_reg[0] ready_sync_reg[0]} {
     km_first_stage $km_app/control $name
 }
